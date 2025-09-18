@@ -22,6 +22,8 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
 
   final originCtl = TextEditingController();
   final destCtl = TextEditingController();
+  final FocusNode _originFocus = FocusNode();
+  final FocusNode _destFocus = FocusNode();
 
   LngLat? origin;
   LngLat? destination;
@@ -33,10 +35,18 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
   FastestOption? selected;
   bool loading = false;
 
+  // sugerencias
+  List<PlaceSuggestion> _originSugs = [];
+  List<PlaceSuggestion> _destSugs = [];
+  Timer? _debounce;
+
   final ll.LatLng cochabamba = const ll.LatLng(-17.39, -66.157);
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _originFocus.dispose();
+    _destFocus.dispose();
     originCtl.dispose();
     destCtl.dispose();
     super.dispose();
@@ -61,13 +71,32 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
       }
       if (perm == geo.LocationPermission.deniedForever) return;
       final p = await geo.Geolocator.getCurrentPosition(locationSettings: const geo.LocationSettings(accuracy: geo.LocationAccuracy.best));
+      final coords = LngLat(p.longitude, p.latitude);
       setState(() {
-        origin = LngLat(p.longitude, p.latitude);
-        originCtl.text = 'Mi ubicación (${p.latitude.toStringAsFixed(5)}, ${p.longitude.toStringAsFixed(5)})';
+        origin = coords;
+        originCtl.text = 'Buscando dirección…';
+        _originSugs = [];
       });
+      unawaited(_updateOriginLabelWithReverse(coords));
       mapCtl.move(ll.LatLng(p.latitude, p.longitude), 15);
     } catch (e) {
       _alert('Ubicación', '$e');
+    }
+  }
+
+  Future<void> _updateOriginLabelWithReverse(LngLat c) async {
+    final name = await GeocodingService.reverse(c.lng, c.lat);
+    if (!mounted) return;
+    if (origin == c && (name ?? '').isNotEmpty) {
+      setState(() => originCtl.text = name!);
+    }
+  }
+
+  Future<void> _updateDestLabelWithReverse(LngLat c) async {
+    final name = await GeocodingService.reverse(c.lng, c.lat);
+    if (!mounted) return;
+    if (destination == c && (name ?? '').isNotEmpty) {
+      setState(() => destCtl.text = name!);
     }
   }
 
@@ -77,11 +106,18 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     final res = await GeocodingService.searchFirst(query);
     if (res.error != null) return _alert('Geocoding', res.error!);
     final c = res.coord!;
+    final name = res.name ?? query;
     setState(() {
       if (forOrigin) {
         origin = c;
+        originCtl.text = name;
+        _originSugs = [];
+        pickingOrigin = false;
       } else {
         destination = c;
+        destCtl.text = name;
+        _destSugs = [];
+        pickingDestination = false;
       }
     });
     mapCtl.move(ll.LatLng(c.lat, c.lng), 15);
@@ -165,16 +201,64 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     _fitToLines([...walkTo, ...segs, ...walkFrom]);
   }
 
+  // debounce helper
+  void _debouncedSuggest({required bool forOrigin, required String text}) {
+    _debounce?.cancel();
+    if (text.trim().length < 3) {
+      setState(() {
+        if (forOrigin) {
+          _originSugs = [];
+        } else {
+          _destSugs = [];
+        }
+      });
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final list = await GeocodingService.suggest(text.trim(), limit: 6);
+      if (!mounted) return;
+      setState(() {
+        if (forOrigin) {
+          _originSugs = list;
+        } else {
+          _destSugs = list;
+        }
+      });
+    });
+  }
+
+  void _selectOriginSuggestion(PlaceSuggestion s) {
+    setState(() {
+      origin = s.coord;
+      originCtl.text = s.name;
+      _originSugs = [];
+      pickingOrigin = false;
+    });
+    mapCtl.move(ll.LatLng(s.coord.lat, s.coord.lng), 15);
+  }
+
+  void _selectDestSuggestion(PlaceSuggestion s) {
+    setState(() {
+      destination = s.coord;
+      destCtl.text = s.name;
+      _destSugs = [];
+      pickingDestination = false;
+    });
+    mapCtl.move(ll.LatLng(s.coord.lat, s.coord.lng), 15);
+  }
+
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.of(context).padding;
+    final size = MediaQuery.of(context).size;
     final topInset = padding.top;
     final bottomInset = padding.bottom;
 
-    // Altura del menú flotante (AppShell)
     const navHeight = 72.0;
     const navBottomMargin = 12.0;
     final navTotalBottom = navHeight + navBottomMargin + bottomInset;
+
+    final sheetMinPx = size.height * 0.22;
 
     final markers = <Marker>[
       if (origin != null)
@@ -185,7 +269,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
 
     return Stack(
       children: [
-        // UN SOLO FlutterMap con todas las capas
         Positioned.fill(
           child: FlutterMap(
             mapController: mapCtl,
@@ -195,15 +278,32 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
               onTap: (tapPos, latlng) {
                 setState(() {
                   if (pickingOrigin) {
-                    origin = LngLat(latlng.longitude, latlng.latitude);
-                    originCtl.text = '(${latlng.latitude.toStringAsFixed(5)}, ${latlng.longitude.toStringAsFixed(5)})';
+                    final c = LngLat(latlng.longitude, latlng.latitude);
+                    origin = c;
+                    originCtl.text = 'Buscando dirección…';
+                    _originSugs = [];
                     pickingOrigin = false;
+                    unawaited(_updateOriginLabelWithReverse(c));
                   } else if (pickingDestination) {
-                    destination = LngLat(latlng.longitude, latlng.latitude);
-                    destCtl.text = '(${latlng.latitude.toStringAsFixed(5)}, ${latlng.longitude.toStringAsFixed(5)})';
+                    final c = LngLat(latlng.longitude, latlng.latitude);
+                    destination = c;
+                    destCtl.text = 'Buscando dirección…';
+                    _destSugs = [];
                     pickingDestination = false;
+                    unawaited(_updateDestLabelWithReverse(c));
                   }
                 });
+              },
+              onLongPress: (tapPos, latlng) {
+                final c = LngLat(latlng.longitude, latlng.latitude);
+                setState(() {
+                  destination = c;
+                  destCtl.text = 'Buscando dirección…';
+                  _destSugs = [];
+                  pickingDestination = false;
+                  pickingOrigin = false;
+                });
+                unawaited(_updateDestLabelWithReverse(c));
               },
             ),
             children: [
@@ -218,7 +318,7 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
           ),
         ),
 
-        // Pill superior respetando el status bar
+        // Pill superior con autocompletado embebido
         Positioned(
           top: topInset + 8,
           left: 12,
@@ -226,10 +326,34 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
           child: _SearchPill(
             originCtl: originCtl,
             destCtl: destCtl,
-            pickingOrigin: pickingOrigin,
-            pickingDestination: pickingDestination,
-            onPickOrigin: () => setState(() => pickingOrigin = !pickingOrigin),
-            onPickDestination: () => setState(() => pickingDestination = !pickingDestination),
+            originFocus: _originFocus,
+            destFocus: _destFocus,
+            originSugs: _originSugs,
+            destSugs: _destSugs,
+            onOriginChanged: (t) => _debouncedSuggest(forOrigin: true, text: t),
+            onDestChanged: (t) => _debouncedSuggest(forOrigin: false, text: t),
+            onPickOrigin: () => setState(() {
+              pickingOrigin = !pickingOrigin;
+              if (pickingOrigin) {
+                pickingDestination = false;
+                _originFocus.unfocus();
+                _destFocus.unfocus();
+                _originSugs = [];
+                _destSugs = [];
+              }
+            }),
+            onPickDestination: () => setState(() {
+              pickingDestination = !pickingDestination;
+              if (pickingDestination) {
+                pickingOrigin = false;
+                _originFocus.unfocus();
+                _destFocus.unfocus();
+                _originSugs = [];
+                _destSugs = [];
+              }
+            }),
+            onSelectOriginSuggestion: _selectOriginSuggestion,
+            onSelectDestSuggestion: _selectDestSuggestion,
             onSwap: () => setState(() {
               final tmp = origin;
               origin = destination;
@@ -242,13 +366,15 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
             onGeocodeDest: () => _geocode(forOrigin: false),
             onMyLocation: _useMyLocationAsOrigin,
             onCalc: loading ? null : _calc,
+            pickingOrigin: pickingOrigin,
+            pickingDestination: pickingDestination,
           ),
         ),
 
-        // Botones flotantes con margen dinámico para no chocar con el nav
+        // FABs laterales
         Positioned(
           right: 12 + padding.right,
-          bottom: navTotalBottom + (results.isEmpty ? 12 : 220),
+          bottom: navTotalBottom + (results.isEmpty ? 12 : sheetMinPx + 12),
           child: Column(
             children: [
               _RoundFab(icon: Icons.my_location, onPressed: _useMyLocationAsOrigin),
@@ -261,6 +387,9 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
         if (results.isNotEmpty)
           _ResultsDraggableSheet(
             bottomSafeSpace: navTotalBottom,
+            initialChildSize: selected != null ? 0.26 : 0.22,
+            minChildSize: selected != null ? 0.22 : 0.18,
+            maxChildSize: 0.70,
             results: results,
             selected: selected,
             onPick: (o) {
@@ -270,6 +399,7 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
               final walkFrom = parseGeoJsonLine(o.walkFrom, color: const Color(0xFF757575), width: 3);
               _fitToLines([...walkTo, ...segs, ...walkFrom]);
             },
+            onCenter: _recenter,
           ),
       ],
     );
@@ -279,33 +409,83 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
 class _SearchPill extends StatelessWidget {
   final TextEditingController originCtl;
   final TextEditingController destCtl;
-  final bool pickingOrigin;
-  final bool pickingDestination;
+  final FocusNode originFocus;
+  final FocusNode destFocus;
+
+  final List<PlaceSuggestion> originSugs;
+  final List<PlaceSuggestion> destSugs;
+
+  final ValueChanged<String> onOriginChanged;
+  final ValueChanged<String> onDestChanged;
+
   final VoidCallback onPickOrigin;
   final VoidCallback onPickDestination;
+  final void Function(PlaceSuggestion) onSelectOriginSuggestion;
+  final void Function(PlaceSuggestion) onSelectDestSuggestion;
+
   final VoidCallback onSwap;
   final VoidCallback onGeocodeOrigin;
   final VoidCallback onGeocodeDest;
   final VoidCallback onMyLocation;
   final VoidCallback? onCalc;
 
+  final bool pickingOrigin;
+  final bool pickingDestination;
+
   const _SearchPill({
     required this.originCtl,
     required this.destCtl,
-    required this.pickingOrigin,
-    required this.pickingDestination,
+    required this.originFocus,
+    required this.destFocus,
+    required this.originSugs,
+    required this.destSugs,
+    required this.onOriginChanged,
+    required this.onDestChanged,
     required this.onPickOrigin,
     required this.onPickDestination,
+    required this.onSelectOriginSuggestion,
+    required this.onSelectDestSuggestion,
     required this.onSwap,
     required this.onGeocodeOrigin,
     required this.onGeocodeDest,
     required this.onMyLocation,
     required this.onCalc,
+    required this.pickingOrigin,
+    required this.pickingDestination,
   });
 
   @override
   Widget build(BuildContext context) {
     final blur = 12.0;
+
+    Widget buildSuggestions(List<PlaceSuggestion> sugs, void Function(PlaceSuggestion) onSelect) {
+      if (sugs.isEmpty) return const SizedBox.shrink();
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: Container(
+          margin: const EdgeInsets.only(top: 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4))],
+          ),
+          child: ListView.separated(
+            itemCount: sugs.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final s = sugs[i];
+              return ListTile(
+                dense: true,
+                leading: const Icon(Icons.location_on_outlined),
+                title: Text(s.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                onTap: () => onSelect(s),
+              );
+            },
+          ),
+        ),
+      );
+    }
+
     final content = Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.92),
@@ -316,12 +496,15 @@ class _SearchPill extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Origen
           Row(children: [
-            const Icon(Icons.radio_button_checked, size: 18, color: Color(0xFF007AFF)),
+            Icon(pickingOrigin ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18, color: const Color(0xFF007AFF)),
             const SizedBox(width: 6),
             Expanded(
               child: TextField(
+                focusNode: originFocus,
                 controller: originCtl,
+                onChanged: onOriginChanged,
                 decoration: const InputDecoration(
                   isDense: true,
                   hintText: 'Selecciona origen',
@@ -329,32 +512,34 @@ class _SearchPill extends StatelessWidget {
                 ),
               ),
             ),
-            IconButton(onPressed: onGeocodeOrigin, icon: const Icon(Icons.search)),
-            IconButton(onPressed: onPickOrigin, icon: const Icon(Icons.map_outlined)),
+            IconButton(onPressed: onGeocodeOrigin, tooltip: 'Buscar origen', icon: const Icon(Icons.search)),
+            IconButton(onPressed: onPickOrigin, tooltip: 'Elegir origen en el mapa', icon: const Icon(Icons.map_outlined)),
           ]),
+          buildSuggestions(originSugs, onSelectOriginSuggestion),
           const SizedBox(height: 8),
-          Stack(
-            alignment: Alignment.centerRight,
-            children: [
-              Row(children: [
-                const Icon(Icons.place, size: 20, color: Color(0xFFFF3B30)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: TextField(
-                    controller: destCtl,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: 'Selecciona destino',
-                      border: InputBorder.none,
-                    ),
-                  ),
+
+          // Destino
+          Row(children: [
+            Icon(pickingDestination ? Icons.place : Icons.place_outlined, size: 20, color: const Color(0xFFFF3B30)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: TextField(
+                focusNode: destFocus,
+                controller: destCtl,
+                onChanged: onDestChanged,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  hintText: 'Selecciona destino',
+                  border: InputBorder.none,
                 ),
-                IconButton(onPressed: onGeocodeDest, icon: const Icon(Icons.search)),
-                IconButton(onPressed: onPickDestination, icon: const Icon(Icons.add_location_alt_outlined)),
-              ]),
-              IconButton(onPressed: onSwap, icon: const Icon(Icons.swap_vert_circle, size: 26)),
-            ],
-          ),
+              ),
+            ),
+            IconButton(onPressed: onGeocodeDest, tooltip: 'Buscar destino', icon: const Icon(Icons.search)),
+            IconButton(onPressed: onPickDestination, tooltip: 'Elegir destino en el mapa', icon: const Icon(Icons.map_outlined)),
+            IconButton(onPressed: onSwap, tooltip: 'Intercambiar', icon: const Icon(Icons.swap_vert_circle, size: 26)),
+          ]),
+          buildSuggestions(destSugs, onSelectDestSuggestion),
+
           const SizedBox(height: 10),
           Row(
             children: [
@@ -399,28 +584,42 @@ class _RoundFab extends StatelessWidget {
 
 class _ResultsDraggableSheet extends StatelessWidget {
   final double bottomSafeSpace;
+  final double initialChildSize;
+  final double minChildSize;
+  final double maxChildSize;
   final List<FastestOption> results;
   final FastestOption? selected;
   final ValueChanged<FastestOption> onPick;
+  final VoidCallback onCenter;
 
   const _ResultsDraggableSheet({
     required this.bottomSafeSpace,
+    required this.initialChildSize,
+    required this.minChildSize,
+    required this.maxChildSize,
     required this.results,
     required this.selected,
     required this.onPick,
+    required this.onCenter,
   });
 
   String _fmtKm(double m) => '${(m / 1000).toStringAsFixed(m >= 1000 ? 0 : 1)} km';
 
   @override
   Widget build(BuildContext context) {
+    final hasSelected = selected != null;
+    final filtered = hasSelected
+        ? results.where((o) => o.lineDirectionId != selected!.lineDirectionId).toList()
+        : results;
+
+    final extraBottom = bottomSafeSpace + 16;
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.22,
-      minChildSize: 0.18,
-      maxChildSize: 0.65,
+      initialChildSize: initialChildSize,
+      minChildSize: minChildSize,
+      maxChildSize: maxChildSize,
       builder: (context, controller) {
         return Container(
-          padding: EdgeInsets.only(bottom: bottomSafeSpace),
           decoration: const BoxDecoration(
             color: Color(0xFFFDFDFD),
             borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
@@ -436,12 +635,49 @@ class _ResultsDraggableSheet extends StatelessWidget {
               Expanded(
                 child: ListView.builder(
                   controller: controller,
-                  itemCount: results.length,
+                  padding: EdgeInsets.fromLTRB(12, 0, 12, extraBottom),
+                  itemCount: filtered.length + (hasSelected ? 1 : 0),
+                  physics: const ClampingScrollPhysics(),
                   itemBuilder: (_, i) {
-                    final o = results[i];
+                    if (hasSelected && i == 0) {
+                      final s = selected!;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 8, offset: Offset(0, 3))],
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                Container(width: 22, height: 22, decoration: BoxDecoration(color: colorFromHex(s.colorHex), borderRadius: BorderRadius.circular(6))),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('${s.code} • ${s.lineName}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                      Text('"${s.headsign}"', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Color(0xFF666666))),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(onPressed: onCenter, icon: const Icon(Icons.center_focus_strong)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final idx = i - (hasSelected ? 1 : 0);
+                    final o = filtered[idx];
                     final active = selected?.lineDirectionId == o.lineDirectionId;
+
                     return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
                         onTap: () => onPick(o),
