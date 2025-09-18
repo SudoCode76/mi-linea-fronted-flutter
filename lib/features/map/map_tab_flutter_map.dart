@@ -5,10 +5,20 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:latlong2/latlong.dart' as ll;
 
+import 'package:mi_linea/core/env.dart';
 import 'package:mi_linea/core/geocoding.dart';
 import 'package:mi_linea/core/geojson.dart';
 import 'package:mi_linea/data/models/fastest_option.dart';
 import 'package:mi_linea/data/services/backend_service.dart';
+
+enum BaseMapStyle {
+  osm,
+  mapboxStreets,
+  mapboxNavigation,
+  mapboxLight,
+  mapboxSatellite,
+  cartoVoyager,
+}
 
 class MapTabFlutterMap extends StatefulWidget {
   const MapTabFlutterMap({super.key});
@@ -42,6 +52,9 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
 
   final ll.LatLng cochabamba = const ll.LatLng(-17.39, -66.157);
 
+  // Estilo base
+  BaseMapStyle _style = BaseMapStyle.mapboxStreets;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -50,6 +63,81 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     originCtl.dispose();
     destCtl.dispose();
     super.dispose();
+  }
+
+  // Construye la capa de tiles según el estilo elegido
+  TileLayer _buildTileLayer(BuildContext context) {
+    final token = AppEnv.mapboxToken;
+    switch (_style) {
+      case BaseMapStyle.mapboxStreets:
+        return TileLayer(
+          urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+      case BaseMapStyle.mapboxNavigation:
+        return TileLayer(
+          urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+      case BaseMapStyle.mapboxLight:
+        return TileLayer(
+          urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+      case BaseMapStyle.mapboxSatellite:
+        return TileLayer(
+          urlTemplate: 'https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+      case BaseMapStyle.cartoVoyager:
+        return TileLayer(
+          urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          subdomains: const ['a', 'b', 'c', 'd'],
+          retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+      case BaseMapStyle.osm:
+      default:
+        return TileLayer(
+          urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c'],
+          userAgentPackageName: 'com.example.mi_linea',
+        );
+    }
+  }
+
+  // Selector de estilo: ahora scrollable y sin overflow
+  Future<void> _pickBaseMap() async {
+    final chosen = await showModalBottomSheet<BaseMapStyle>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.55,
+          minChildSize: 0.35,
+          maxChildSize: 0.90,
+          builder: (ctx, controller) {
+            return _BasemapPickerList(
+              current: _style,
+              scrollController: controller,
+            );
+          },
+        );
+      },
+    );
+    if (chosen != null && mounted) {
+      setState(() => _style = chosen);
+    }
   }
 
   void _fitToLines(List<GeoLine> lines) {
@@ -307,11 +395,7 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
               },
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                subdomains: const ['a', 'b', 'c'],
-                userAgentPackageName: 'com.example.mi_linea',
-              ),
+              _buildTileLayer(context),
               PolylineLayer(polylines: _polylines()),
               MarkerLayer(markers: markers),
             ],
@@ -371,12 +455,14 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
           ),
         ),
 
-        // FABs laterales
+        // FABs laterales (añadimos selector de estilo)
         Positioned(
           right: 12 + padding.right,
           bottom: navTotalBottom + (results.isEmpty ? 12 : sheetMinPx + 12),
           child: Column(
             children: [
+              _RoundFab(icon: Icons.layers, onPressed: _pickBaseMap),
+              const SizedBox(height: 10),
               _RoundFab(icon: Icons.my_location, onPressed: _useMyLocationAsOrigin),
               const SizedBox(height: 10),
               _RoundFab(icon: Icons.center_focus_strong, onPressed: selected == null ? null : _recenter),
@@ -402,6 +488,54 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
             onCenter: _recenter,
           ),
       ],
+    );
+  }
+}
+
+// Lista scrollable para el selector de estilos
+class _BasemapPickerList extends StatelessWidget {
+  final BaseMapStyle current;
+  final ScrollController scrollController;
+  const _BasemapPickerList({
+    required this.current,
+    required this.scrollController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tile(BaseMapStyle s, String title, String? subtitle) {
+      final selected = s == current;
+      return ListTile(
+        leading: Icon(
+          s == BaseMapStyle.mapboxSatellite ? Icons.satellite_alt : Icons.map_outlined,
+          color: selected ? Theme.of(context).colorScheme.primary : null,
+        ),
+        title: Text(title),
+        subtitle: subtitle == null ? null : Text(subtitle),
+        trailing: selected ? const Icon(Icons.check_circle, color: Colors.green) : null,
+        onTap: () => Navigator.pop(context, s),
+      );
+    }
+
+    final bottom = MediaQuery.of(context).viewPadding.bottom + 12;
+
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: ListView(
+        controller: scrollController,
+        padding: EdgeInsets.only(left: 8, right: 8, bottom: bottom),
+        children: [
+          const SizedBox(height: 6),
+          const Center(child: Text('Estilo de mapa', style: TextStyle(fontWeight: FontWeight.w700))),
+          const SizedBox(height: 6),
+          tile(BaseMapStyle.mapboxStreets, 'Mapbox Streets', 'Estilo general, similar a Google Maps'),
+          tile(BaseMapStyle.mapboxNavigation, 'Mapbox Navigation', 'Carreteras destacadas, alto contraste'),
+          tile(BaseMapStyle.mapboxLight, 'Mapbox Light', 'Claro y minimalista'),
+          tile(BaseMapStyle.mapboxSatellite, 'Mapbox Satellite', 'Imágenes satelitales con labels'),
+          tile(BaseMapStyle.cartoVoyager, 'Carto Voyager', 'Bonito y ligero (sin token)'),
+          tile(BaseMapStyle.osm, 'OpenStreetMap', 'Estándar OSM'),
+        ],
+      ),
     );
   }
 }
@@ -470,6 +604,7 @@ class _SearchPill extends StatelessWidget {
             boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4))],
           ),
           child: ListView.separated(
+            shrinkWrap: true,
             itemCount: sugs.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (_, i) {
@@ -569,12 +704,16 @@ class _RoundFab extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8), // <- corregido
         child: Material(
           color: Colors.white.withValues(alpha: enabled ? 0.9 : 0.55),
           child: InkWell(
             onTap: onPressed,
-            child: SizedBox(width: 48, height: 48, child: Icon(icon, size: 20, color: const Color(0xFF333333))),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Icon(icon, size: 20, color: const Color(0xFF333333)),
+            ),
           ),
         ),
       ),
