@@ -3,12 +3,15 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 
 import 'app_shell.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    await dotenv.load(fileName: '.env');
-  } catch (_) {}
+  await dotenv.load(fileName: '.env');
+
+  final themeController = AppThemeController();
+  await themeController.load();
+
   try {
     final perm = await geo.Geolocator.checkPermission();
     if (perm == geo.LocationPermission.denied) {
@@ -16,35 +19,28 @@ Future<void> main() async {
     }
   } catch (_) {}
 
-  runApp(const App());
+  runApp(App(themeController: themeController));
 }
 
 class App extends StatelessWidget {
-  const App({super.key});
+  final AppThemeController themeController;
+  const App({super.key, required this.themeController});
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF007AFF),
-      brightness: Brightness.light,
-    );
-
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFFF6F7FB),
-        cardTheme: const CardThemeData(
-          color: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(16)),
-          ),
-          margin: EdgeInsets.all(8), // opcional
-        ),
-      ),
-      home: const AppShell(),
+    return AnimatedBuilder(
+      animation: themeController,
+      builder: (context, _) {
+        // Para el modo system usamos el ThemeMode + darkTheme opcional
+        final mode = AppTheme.toThemeMode(themeController.preference);
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          themeMode: mode,
+          theme: AppTheme.build(Brightness.light),
+          darkTheme: AppTheme.build(Brightness.dark),
+          home: AppShell(themeController: themeController),
+        );
+      },
     );
   }
 }

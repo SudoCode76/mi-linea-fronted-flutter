@@ -8,8 +8,8 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:mi_linea/core/geojson.dart';
 import 'package:mi_linea/data/services/backend_service.dart';
 import 'package:mi_linea/core/env.dart';
+import 'package:mi_linea/theme/theme_extensions.dart';
 
-// Repite enum (si prefieres, muévelo a un archivo compartido)
 enum BaseMapStyle {
   mapboxStreets,
   mapboxNavigation,
@@ -45,12 +45,10 @@ class _DirectionDetailsState extends State<DirectionDetails> {
   List<Marker> _markers = [];
   LatLngBounds? _bounds;
 
-  // Ubicación usuario
   ll.LatLng? _userLatLng;
   bool _locLoading = false;
   bool _locDenied = false;
 
-  // Estilos
   BaseMapStyle _style = BaseMapStyle.mapboxStreets;
 
   @override
@@ -60,7 +58,6 @@ class _DirectionDetailsState extends State<DirectionDetails> {
     _initLocation();
   }
 
-  // ---- UBICACIÓN ----
   Future<void> _initLocation() async {
     setState(() {
       _locLoading = true;
@@ -82,20 +79,19 @@ class _DirectionDetailsState extends State<DirectionDetails> {
         return;
       }
       final p = await geo.Geolocator.getCurrentPosition(
-          locationSettings: const geo.LocationSettings(
-              accuracy: geo.LocationAccuracy.best));
+          locationSettings:
+          const geo.LocationSettings(accuracy: geo.LocationAccuracy.best));
       if (!mounted) return;
       setState(() {
         _userLatLng = ll.LatLng(p.latitude, p.longitude);
         _locLoading = false;
       });
-      _rebuildMarkers(); // añadir marcador azul si ya estaba la ruta
+      _rebuildMarkers();
     } catch (_) {
       if (mounted) setState(() => _locLoading = false);
     }
   }
 
-  // ---- CARGA RUTA ----
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -124,9 +120,8 @@ class _DirectionDetailsState extends State<DirectionDetails> {
       for (final l in lines) {
         final pts = l.points.map((p) => ll.LatLng(p.lat, p.lng)).toList();
         allPts.addAll(pts);
-        // Stroke blanco + color
-        polylinesTmp.add(
-            Polyline(points: pts, color: Colors.white, strokeWidth: l.width + 4));
+        polylinesTmp.add(Polyline(
+            points: pts, color: Colors.white, strokeWidth: l.width + 4));
         polylinesTmp.add(
             Polyline(points: pts, color: l.color, strokeWidth: l.width));
       }
@@ -166,20 +161,18 @@ class _DirectionDetailsState extends State<DirectionDetails> {
     }
   }
 
-  // ---- MARCADORES ----
   void _rebuildMarkers() {
     final markersTmp = <Marker>[];
 
-    // Ruta
     if (_polylines.isNotEmpty) {
-      final all = _polylines
-          .where((p) => p.strokeWidth > 4) // tomar solo uno (color) para extremos
+      final colorLayer = _polylines
+          .where((p) => p.strokeWidth > 4)
           .expand((p) => p.points)
           .toList();
-      if (all.isNotEmpty) {
+      if (colorLayer.isNotEmpty) {
         markersTmp.add(
           Marker(
-            point: all.first,
+            point: colorLayer.first,
             width: 36,
             height: 36,
             child: const Icon(Icons.radio_button_checked,
@@ -188,16 +181,16 @@ class _DirectionDetailsState extends State<DirectionDetails> {
         );
         markersTmp.add(
           Marker(
-            point: all.last,
+            point: colorLayer.last,
             width: 36,
             height: 36,
-            child: const Icon(Icons.place, color: Color(0xFFFF3B30), size: 26),
+            child:
+            const Icon(Icons.place, color: Color(0xFFFF3B30), size: 26),
           ),
         );
       }
     }
 
-    // Ubicación usuario
     if (_userLatLng != null) {
       markersTmp.add(
         Marker(
@@ -210,10 +203,19 @@ class _DirectionDetailsState extends State<DirectionDetails> {
               Container(
                 width: 28,
                 height: 28,
-                decoration: const BoxDecoration(
-                  color: Colors.white,
+                decoration: BoxDecoration(
+                  color:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
                   shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: Color(0x33000000), blurRadius: 6)],
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(
+                          Theme.of(context).brightness == Brightness.dark
+                              ? 0.40
+                              : 0.20),
+                      blurRadius: 6,
+                    )
+                  ],
                 ),
               ),
               Container(
@@ -233,28 +235,31 @@ class _DirectionDetailsState extends State<DirectionDetails> {
     setState(() => _markers = markersTmp);
   }
 
-  // ---- MAP STYLES ----
   TileLayer _buildTileLayer() {
     final token = AppEnv.mapboxToken;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     switch (_style) {
       case BaseMapStyle.mapboxStreets:
         return TileLayer(
-          urlTemplate:
-          'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          urlTemplate: isDark
+              ? 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es'
+              : 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
           retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
           userAgentPackageName: 'com.example.mi_linea',
         );
       case BaseMapStyle.mapboxNavigation:
         return TileLayer(
-          urlTemplate:
-          'https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          urlTemplate: isDark
+              ? 'https://api.mapbox.com/styles/v1/mapbox/navigation-night-v1/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es'
+              : 'https://api.mapbox.com/styles/v1/mapbox/navigation-day-v1/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
           retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
           userAgentPackageName: 'com.example.mi_linea',
         );
       case BaseMapStyle.mapboxLight:
         return TileLayer(
-          urlTemplate:
-          'https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
+          urlTemplate: isDark
+              ? 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es'
+              : 'https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/256/{z}/{x}/{y}{r}?access_token=$token&language=es',
           retinaMode: MediaQuery.of(context).devicePixelRatio > 1.5,
           userAgentPackageName: 'com.example.mi_linea',
         );
@@ -286,30 +291,25 @@ class _DirectionDetailsState extends State<DirectionDetails> {
   Future<void> _pickStyle() async {
     final chosen = await showModalBottomSheet<BaseMapStyle>(
       context: context,
-      isScrollControlled: true,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (_) {
-        return _StyleSheet(
-          current: _style,
-          hasToken: AppEnv.mapboxToken.isNotEmpty,
-        );
+        return _StyleSheet(current: _style, hasToken: AppEnv.mapboxToken.isNotEmpty);
       },
     );
-    if (chosen != null && mounted) {
-      setState(() => _style = chosen);
-    }
+    if (chosen != null && mounted) setState(() => _style = chosen);
   }
 
-  // ---- ACCIONES ----
   void _recenterRoute() {
     final b = _bounds;
     if (b == null) return;
     _mapCtl.fitCamera(
       CameraFit.bounds(
-          bounds: b, padding: const EdgeInsets.fromLTRB(12, 120, 12, 80)),
+        bounds: b,
+        padding: const EdgeInsets.fromLTRB(12, 120, 12, 80),
+      ),
     );
   }
 
@@ -347,8 +347,6 @@ class _DirectionDetailsState extends State<DirectionDetails> {
       body: Stack(
         children: [
           Positioned.fill(child: mapWidget),
-
-          // FABs alineados
           Positioned(
             right: 12,
             bottom: 20 + MediaQuery.of(context).padding.bottom,
@@ -362,17 +360,22 @@ class _DirectionDetailsState extends State<DirectionDetails> {
                 const SizedBox(height: 10),
                 FloatingActionButton.small(
                   heroTag: 'user_${widget.directionId}',
-                  onPressed:
-                  _userLatLng == null ? (_locLoading ? null : _initLocation) : _centerOnUser,
+                  onPressed: _userLatLng == null
+                      ? (_locLoading ? null : _initLocation)
+                      : _centerOnUser,
                   child: _locLoading
                       ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                      : Icon(_userLatLng == null
-                      ? (_locDenied ? Icons.location_disabled : Icons.my_location)
-                      : Icons.my_location),
+                      : Icon(
+                    _userLatLng == null
+                        ? (_locDenied
+                        ? Icons.location_disabled
+                        : Icons.my_location)
+                        : Icons.my_location,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 FloatingActionButton.small(
@@ -389,12 +392,10 @@ class _DirectionDetailsState extends State<DirectionDetails> {
               ],
             ),
           ),
-
           if (_loading)
             const Positioned.fill(
               child: Center(child: CircularProgressIndicator()),
             ),
-
           if (_error != null)
             Positioned.fill(
               child: Container(
@@ -428,7 +429,6 @@ class _DirectionDetailsState extends State<DirectionDetails> {
   }
 }
 
-// --------- Hoja de selección de estilo ----------
 class _StyleSheet extends StatelessWidget {
   final BaseMapStyle current;
   final bool hasToken;
@@ -456,22 +456,19 @@ class _StyleSheet extends StatelessWidget {
 
     final list = <Widget>[
       if (hasToken) ...[
-        tile(BaseMapStyle.mapboxStreets, 'Mapbox Streets',
-            'Estilo general'),
-        tile(BaseMapStyle.mapboxNavigation, 'Mapbox Navigation',
-            'Alto contraste'),
-        tile(BaseMapStyle.mapboxLight, 'Mapbox Light', 'Claro y limpio'),
-        tile(BaseMapStyle.mapboxSatellite, 'Mapbox Satellite',
-            'Satélite + labels'),
+        tile(BaseMapStyle.mapboxStreets, 'Mapbox Streets', 'General'),
+        tile(BaseMapStyle.mapboxNavigation, 'Mapbox Navigation', 'Contraste'),
+        tile(BaseMapStyle.mapboxLight, 'Mapbox Light/Dark', 'Claro / Oscuro'),
+        tile(BaseMapStyle.mapboxSatellite, 'Mapbox Satellite', 'Satélite'),
       ],
       tile(BaseMapStyle.cartoVoyager, 'Carto Voyager', 'Ligero'),
-      tile(BaseMapStyle.osm, 'OpenStreetMap', 'Básico OSM'),
+      tile(BaseMapStyle.osm, 'OpenStreetMap', 'Básico'),
     ];
 
     final bottom = MediaQuery.of(context).padding.bottom + 12;
 
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: ListView(
         padding: EdgeInsets.fromLTRB(8, 6, 8, bottom),
         children: [

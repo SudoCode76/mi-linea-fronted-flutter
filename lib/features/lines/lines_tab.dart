@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:mi_linea/core/geojson.dart';
 import 'package:mi_linea/data/models/line_item.dart';
 import 'package:mi_linea/data/services/backend_service.dart';
+import 'package:mi_linea/theme/theme_extensions.dart';
 import 'direction_details.dart';
 
 class LinesTab extends StatefulWidget {
@@ -53,7 +54,7 @@ class _LinesTabState extends State<LinesTab> {
       currentQuery = '';
     });
     try {
-      final data = await api.getLines(); // sin filtro
+      final data = await api.getLines();
       if (!mounted) return;
       _all = data;
       items = List.from(_all);
@@ -68,7 +69,6 @@ class _LinesTabState extends State<LinesTab> {
   Future<void> _performSearch(String q) async {
     currentQuery = q;
     if (q.isEmpty) {
-      // Restaurar todo
       setState(() {
         items = List.from(_all);
         searching = false;
@@ -81,20 +81,10 @@ class _LinesTabState extends State<LinesTab> {
     });
 
     try {
-      // --- BÚSQUEDA REMOTA ---
       final data = await api.getLines(query: q);
       if (!mounted) return;
       items = data;
       searching = false;
-
-      // --- BÚSQUEDA LOCAL (alternativa) ---
-      // final norm = _norm(q);
-      // items = _all.where((l) {
-      //   final txt = _norm('${l.code} ${l.lineName} ${l.headsign}');
-      //   return txt.contains(norm);
-      // }).toList();
-      // searching = false;
-
       setState(() {});
     } catch (e) {
       if (!mounted) return;
@@ -104,18 +94,6 @@ class _LinesTabState extends State<LinesTab> {
     }
   }
 
-  String _norm(String s) {
-    return s
-        .toLowerCase()
-        .replaceAll(RegExp(r'[áàä]'), 'a')
-        .replaceAll(RegExp(r'[éèë]'), 'e')
-        .replaceAll(RegExp(r'[íìï]'), 'i')
-        .replaceAll(RegExp(r'[óòö]'), 'o')
-        .replaceAll(RegExp(r'[úùü]'), 'u')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
   void _showError(String title, String msg) {
     showDialog(
       context: context,
@@ -123,15 +101,16 @@ class _LinesTabState extends State<LinesTab> {
         title: Text(title),
         content: Text(msg),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
   }
 
-  void _clearSearch() {
-    _searchCtl.clear(); // disparará listener -> restaurar lista
-  }
+  void _clearSearch() => _searchCtl.clear();
 
   @override
   Widget build(BuildContext context) {
@@ -140,16 +119,17 @@ class _LinesTabState extends State<LinesTab> {
 
     const navHeight = 72.0;
     const navBottomMargin = 12.0;
-    final listBottomPadding = bottomInset + navHeight + navBottomMargin + 24;
+    final listBottomPadding =
+        bottomInset + navHeight + navBottomMargin + 24;
 
-    final showEmpty = !loading && items.isEmpty && currentQuery.isNotEmpty && !searching;
+    final showEmpty =
+        !loading && items.isEmpty && currentQuery.isNotEmpty && !searching;
 
     return SafeArea(
       top: true,
       bottom: false,
       child: Column(
         children: [
-          // Buscador “glass”
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: _SearchHeader(
@@ -170,14 +150,19 @@ class _LinesTabState extends State<LinesTab> {
                 children: [
                   Text('Sin resultados para “$currentQuery”'),
                   const SizedBox(height: 10),
-                  OutlinedButton(onPressed: _clearSearch, child: const Text('Limpiar búsqueda')),
+                  OutlinedButton(
+                    onPressed: _clearSearch,
+                    child: const Text('Limpiar búsqueda'),
+                  ),
                 ],
               ),
             )
                 : ListView.separated(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, listBottomPadding),
+              padding:
+              EdgeInsets.fromLTRB(16, 8, 16, listBottomPadding),
               itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (_, __) =>
+              const SizedBox(height: 12),
               itemBuilder: (_, i) {
                 final it = items[i];
                 return _LineCard(
@@ -187,13 +172,16 @@ class _LinesTabState extends State<LinesTab> {
                   direction: it.direction,
                   colorHex: it.colorHex,
                   onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => DirectionDetails(
-                        directionId: it.lineDirectionId,
-                        title: '${it.code} • ${it.lineName} (${it.headsign})',
-                        colorHex: it.colorHex,
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DirectionDetails(
+                          directionId: it.lineDirectionId,
+                          title:
+                          '${it.code} • ${it.lineName} (${it.headsign})',
+                          colorHex: it.colorHex,
+                        ),
                       ),
-                    ));
+                    );
                   },
                 );
               },
@@ -205,7 +193,6 @@ class _LinesTabState extends State<LinesTab> {
   }
 }
 
-// --- Header con TextField ---
 class _SearchHeader extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onRefresh;
@@ -223,18 +210,28 @@ class _SearchHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.white.withOpacity(0.92);
+    final glass = Theme.of(context).extension<AppGlass>()!;
+    final shapes = Theme.of(context).extension<AppShapes>()!;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(shapes.radiusLg),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        filter: ImageFilter.blur(
+            sigmaX: glass.blurSigma, sigmaY: glass.blurSigma),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [
-              BoxShadow(color: Color(0x22000000), blurRadius: 10, offset: Offset(0, 4))
+            color: glass.surface.withOpacity(glass.opacity),
+            border: Border.all(color: glass.border),
+            borderRadius: BorderRadius.circular(shapes.radiusLg),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(
+                    Theme.of(context).brightness == Brightness.dark
+                        ? 0.35
+                        : 0.12),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
             ],
           ),
           child: Row(
@@ -298,15 +295,23 @@ class _LineCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final col = colorFromHex(colorHex);
+    final shapes = Theme.of(context).extension<AppShapes>()!;
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(shapes.radiusLg),
       onTap: onTap,
       child: Ink(
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: const [
-            BoxShadow(color: Color(0x14000000), blurRadius: 14, offset: Offset(0, 6))
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(shapes.radiusLg),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(
+                  Theme.of(context).brightness == Brightness.dark
+                      ? 0.40
+                      : 0.12),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
           ],
         ),
         child: Padding(
@@ -314,20 +319,54 @@ class _LineCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(width: 44, height: 44, decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(12))),
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: col,
+                  borderRadius: BorderRadius.circular(shapes.radiusMd),
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('$code • $name', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    Text('$code • $name',
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 2),
-                    Text('"$headsign"', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFF6F6F6F))),
+                    Text('"$headsign"',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(.65),
+                        )),
                     const SizedBox(height: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: const Color(0xFFF1F1F3), borderRadius: BorderRadius.circular(10)),
-                      child: Text(direction, style: const TextStyle(fontSize: 12, color: Color(0xFF444444))),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceVariant
+                            .withOpacity(.55),
+                        borderRadius:
+                        BorderRadius.circular(shapes.radiusSm + 2),
+                      ),
+                      child: Text(
+                        direction,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withOpacity(.75),
+                        ),
+                      ),
                     ),
                   ],
                 ),
