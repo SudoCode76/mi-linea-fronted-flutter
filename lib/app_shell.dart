@@ -14,11 +14,8 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
-  final _tabs = <Widget>[
-    const MapTabFlutterMap(),
-    const LinesTab(),
-    const ChatTab(),
-  ];
+  // Clave para invocar métodos públicos del mapa
+  final GlobalKey<MapTabFlutterMapState> _mapKey = GlobalKey<MapTabFlutterMapState>();
 
   @override
   Widget build(BuildContext context) {
@@ -27,11 +24,28 @@ class _AppShellState extends State<AppShell> {
     final navHorizontalMargin = 16.0;
     final navBottomMargin = 12.0 + bottomInset;
     const navHeight = 72.0;
+    final navOverlapHeight = navHeight + navBottomMargin;
+
+    final tabs = <Widget>[
+      MapTabFlutterMap(key: _mapKey),
+      const LinesTab(),
+      ChatTab(
+        navOverlapHeight: navOverlapHeight,
+        onViewInMap: (oLng, oLat, payload) {
+          // Mostrar la ruta en el mapa
+          _mapKey.currentState?.showFastestFromChat(payload);
+          // Cambiar a tab "Mapa"
+          if (mounted) {
+            setState(() => _index = 0);
+          }
+        },
+      ),
+    ];
 
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: IndexedStack(index: _index, children: _tabs)),
+          Positioned.fill(child: IndexedStack(index: _index, children: tabs)),
           Positioned(
             left: navHorizontalMargin,
             right: navHorizontalMargin,
@@ -42,7 +56,7 @@ class _AppShellState extends State<AppShell> {
                 filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                 child: Container(
                   height: navHeight,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.92),
                     borderRadius: BorderRadius.circular(28),

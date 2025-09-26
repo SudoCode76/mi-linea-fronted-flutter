@@ -23,10 +23,10 @@ enum BaseMapStyle {
 class MapTabFlutterMap extends StatefulWidget {
   const MapTabFlutterMap({super.key});
   @override
-  State<MapTabFlutterMap> createState() => _MapTabFlutterMapState();
+  MapTabFlutterMapState createState() => MapTabFlutterMapState();
 }
 
-class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
+class MapTabFlutterMapState extends State<MapTabFlutterMap> {
   final mapCtl = MapController();
   final api = BackendService();
 
@@ -45,14 +45,12 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
   FastestOption? selected;
   bool loading = false;
 
-  // sugerencias
   List<PlaceSuggestion> _originSugs = [];
   List<PlaceSuggestion> _destSugs = [];
   Timer? _debounce;
 
   final ll.LatLng cochabamba = const ll.LatLng(-17.39, -66.157);
 
-  // Estilo base
   BaseMapStyle _style = BaseMapStyle.mapboxStreets;
 
   @override
@@ -65,7 +63,62 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     super.dispose();
   }
 
-  // Construye la capa de tiles según el estilo elegido
+  // ---- MÉTODO PÚBLICO INVOCADO DESDE EL CHAT ----
+  void showFastestFromChat(Map<String, dynamic> payload) {
+    final fastest = payload['fastest'];
+    final originJson = payload['origin'];
+    final destJson = payload['destination'];
+
+    if (originJson is Map && originJson['lng'] != null && originJson['lat'] != null) {
+      origin = LngLat(
+        (originJson['lng'] as num).toDouble(),
+        (originJson['lat'] as num).toDouble(),
+      );
+      originCtl.text = originJson['label']?.toString() ??
+          originCtl.text; // no hacemos reverse aquí para no bloquear
+    }
+    if (destJson is Map && destJson['lng'] != null && destJson['lat'] != null) {
+      destination = LngLat(
+        (destJson['lng'] as num).toDouble(),
+        (destJson['lat'] as num).toDouble(),
+      );
+      destCtl.text = destJson['label']?.toString() ?? destCtl.text;
+    }
+
+    final List<FastestOption> newResults = [];
+    if (fastest is Map) {
+      final resList = fastest['results'];
+      if (resList is List) {
+        for (final r in resList) {
+          if (r is Map<String, dynamic>) {
+            newResults.add(FastestOption.fromJson(r));
+          } else if (r is Map) {
+            newResults.add(FastestOption.fromJson(Map<String, dynamic>.from(r)));
+          }
+        }
+      }
+    }
+
+    if (newResults.isNotEmpty) {
+      results = newResults;
+      selected = newResults.first;
+      final segs = parseGeoJsonLine(selected!.segGeom, color: colorFromHex(selected!.colorHex), width: 6);
+      final walkTo = parseGeoJsonLine(selected!.walkTo, color: const Color(0xFF757575), width: 3);
+      final walkFrom = parseGeoJsonLine(selected!.walkFrom, color: const Color(0xFF757575), width: 3);
+      _fitToLines([...walkTo, ...segs, ...walkFrom]);
+    }
+
+    pickingOrigin = false;
+    pickingDestination = false;
+    _originSugs = [];
+    _destSugs = [];
+    _originFocus.unfocus();
+    _destFocus.unfocus();
+
+    if (mounted) setState(() {});
+  }
+
+  // Capa de tiles según estilo
   TileLayer _buildTileLayer(BuildContext context) {
     final token = AppEnv.mapboxToken;
     switch (_style) {
@@ -110,7 +163,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     }
   }
 
-  // Selector de estilo: ahora scrollable y sin overflow
   Future<void> _pickBaseMap() async {
     final chosen = await showModalBottomSheet<BaseMapStyle>(
       context: context,
@@ -146,7 +198,12 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     final bounds = LatLngBounds.fromPoints(pts.map((p) => ll.LatLng(p.lat, p.lng)).toList());
     scheduleMicrotask(() {
       try {
-        mapCtl.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.fromLTRB(24, 140, 24, 220)));
+        mapCtl.fitCamera(
+          CameraFit.bounds(
+            bounds: bounds,
+            padding: const EdgeInsets.fromLTRB(24, 140, 24, 220),
+          ),
+        );
       } catch (_) {}
     });
   }
@@ -289,7 +346,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     _fitToLines([...walkTo, ...segs, ...walkFrom]);
   }
 
-  // debounce helper
   void _debouncedSuggest({required bool forOrigin, required String text}) {
     _debounce?.cancel();
     if (text.trim().length < 3) {
@@ -345,7 +401,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
     const navHeight = 72.0;
     const navBottomMargin = 12.0;
     final navTotalBottom = navHeight + navBottomMargin + bottomInset;
-
     final sheetMinPx = size.height * 0.22;
 
     final markers = <Marker>[
@@ -401,8 +456,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
             ],
           ),
         ),
-
-        // Pill superior con autocompletado embebido
         Positioned(
           top: topInset + 8,
           left: 12,
@@ -454,8 +507,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
             pickingDestination: pickingDestination,
           ),
         ),
-
-        // FABs laterales (añadimos selector de estilo)
         Positioned(
           right: 12 + padding.right,
           bottom: navTotalBottom + (results.isEmpty ? 12 : sheetMinPx + 12),
@@ -469,7 +520,6 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
             ],
           ),
         ),
-
         if (results.isNotEmpty)
           _ResultsDraggableSheet(
             bottomSafeSpace: navTotalBottom,
@@ -492,7 +542,8 @@ class _MapTabFlutterMapState extends State<MapTabFlutterMap> {
   }
 }
 
-// Lista scrollable para el selector de estilos
+// ---------- Helpers UI (sin cambios funcionales) ----------
+
 class _BasemapPickerList extends StatelessWidget {
   final BaseMapStyle current;
   final ScrollController scrollController;
@@ -704,7 +755,7 @@ class _RoundFab extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8), // <- corregido
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: Material(
           color: Colors.white.withValues(alpha: enabled ? 0.9 : 0.55),
           child: InkWell(
